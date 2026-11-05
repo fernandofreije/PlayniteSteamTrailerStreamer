@@ -1,4 +1,4 @@
-# release-please keeps a release PR open (version bump + CHANGELOG from Conventional Commits).
+﻿# release-please keeps a release PR open (version bump + CHANGELOG from Conventional Commits).
 # Merging that PR tags vX.Y.Z and creates the GitHub release; the .pext is then built and attached.
 name: Release
 
@@ -34,7 +34,7 @@ jobs:
     needs: [release-please, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: release-pext
           path: dist

@@ -1,4 +1,4 @@
-# Reusable build: compiles the extension and packs the .pext with Playnite's Toolbox.
+﻿# Reusable build: compiles the extension and packs the .pext with Playnite's Toolbox.
 name: Build
 
 on:
@@ -15,32 +15,34 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
-      # Toolbox.exe ships in the portable Playnite zip of every release.
+      # Toolbox.exe ships in the portable Playnite archive (<version>.7z) of every release.
       - name: Download Playnite Toolbox
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $zipDir = Join-Path $env:RUNNER_TEMP "playnite-zip"
+          $archiveDir = Join-Path $env:RUNNER_TEMP "playnite-archive"
           $playniteDir = Join-Path $env:RUNNER_TEMP "playnite"
-          gh release download --repo JosefNemec/Playnite --pattern "Playnite*.zip" --dir $zipDir
+          gh release download --repo JosefNemec/Playnite --pattern "*.7z" --dir $archiveDir
           if ($LASTEXITCODE -ne 0) { throw "Could not download Playnite" }
-          $zip = Get-ChildItem $zipDir -Filter *.zip | Select-Object -First 1
-          Expand-Archive $zip.FullName -DestinationPath $playniteDir
-          if (-not (Test-Path (Join-Path $playniteDir "Toolbox.exe"))) { throw "Toolbox.exe not found in $($zip.Name)" }
-          "PLAYNITE_PATH=$playniteDir" >> $env:GITHUB_ENV
+          $archive = Get-ChildItem $archiveDir -Filter *.7z | Select-Object -First 1
+          7z x $archive.FullName "-o$playniteDir" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract $($archive.Name)" }
+          $toolbox = Get-ChildItem $playniteDir -Filter Toolbox.exe -Recurse | Select-Object -First 1
+          if (-not $toolbox) { throw "Toolbox.exe not found in $($archive.Name)" }
+          "PLAYNITE_PATH=$($toolbox.DirectoryName)" >> $env:GITHUB_ENV
 
       - name: Build and pack
         shell: pwsh
         run: ./build.ps1 -PlaynitePath $env:PLAYNITE_PATH
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ inputs.artifact-name }}
           path: dist/*.pext
