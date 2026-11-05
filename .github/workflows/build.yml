@@ -1,0 +1,47 @@
+# Reusable build: compiles the extension and packs the .pext with Playnite's Toolbox.
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        type: string
+        default: pext
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Toolbox.exe ships in the portable Playnite zip of every release.
+      - name: Download Playnite Toolbox
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zipDir = Join-Path $env:RUNNER_TEMP "playnite-zip"
+          $playniteDir = Join-Path $env:RUNNER_TEMP "playnite"
+          gh release download --repo JosefNemec/Playnite --pattern "Playnite*.zip" --dir $zipDir
+          if ($LASTEXITCODE -ne 0) { throw "Could not download Playnite" }
+          $zip = Get-ChildItem $zipDir -Filter *.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath $playniteDir
+          if (-not (Test-Path (Join-Path $playniteDir "Toolbox.exe"))) { throw "Toolbox.exe not found in $($zip.Name)" }
+          "PLAYNITE_PATH=$playniteDir" >> $env:GITHUB_ENV
+
+      - name: Build and pack
+        shell: pwsh
+        run: ./build.ps1 -PlaynitePath $env:PLAYNITE_PATH
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/*.pext
+          if-no-files-found: error

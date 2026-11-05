@@ -1,0 +1,12 @@
+Id: SteamTrailerStreamer_accc7230-a738-400d-82ef-9e363d51219a
+Name: Steam Trailer Streamer
+Author: fernandofreije
+# x-release-please-start-version
+Version: 1.0.0
+# x-release-please-end
+Module: SteamTrailerStreamer.dll
+Type: GenericPlugin
+Icon: icon.png
+Links:
+    - Name: Requires Extra Metadata Loader
+      Url: https://github.com/darklinkpower/PlayniteExtensionsCollection/wiki/Extra-Metadata-Loader
