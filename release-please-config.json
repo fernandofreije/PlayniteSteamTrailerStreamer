@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "SteamTrailerStreamer",
+      "include-component-in-tag": false,
+      "release-as": "1.0.0",
+      "extra-files": [
+        { "type": "generic", "path": "src/extension.yaml" },
+        { "type": "generic", "path": "src/SteamTrailerStreamer.csproj" }
+      ]
+    }
+  }
+}
