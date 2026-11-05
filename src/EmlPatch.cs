@@ -12,7 +12,8 @@ namespace SteamTrailerStreamer
     /// <summary>
     /// Harmony postfix on Extra Metadata Loader's VideoPlayerControl.UpdateGameVideoSources.
     /// EML first tries local files and its legacy Steam MP4 guess; only when that leaves no trailer
-    /// do we supply the new-format Steam trailer (through the local proxy) and the Steam microtrailer.
+    /// do we supply the new-format Steam trailer (through the local proxy) and the Steam microtrailer,
+    /// or, when Steam has nothing, a trailer found on YouTube.
     /// Written against Extra Metadata Loader 1.87.
     /// </summary>
     internal static class EmlPatch
@@ -126,29 +127,46 @@ namespace SteamTrailerStreamer
                 return;
             }
 
-            if (!(getSteamIdMethod.Invoke(control, new object[] { game }) is string steamId) || string.IsNullOrEmpty(steamId))
-            {
-                return;
-            }
-
-            var emlAppDetailsPath = Path.Combine((string)pluginDataPathField.GetValue(control), $"{game.Id}_SteamAppDetails.json");
-            var movie = plugin.Resolver.Resolve(steamId, emlAppDetailsPath);
-            if (movie == null)
-            {
-                return;
-            }
-
-            // Starts converting right away, before the player asks for the file.
-            Uri trailer = plugin.ResolveFfmpegPath() != null
-                ? plugin.Server.Prepare(steamId, movie.HlsUrls, settings.MaxVideoHeight, settings.MaxTrailerMinutes * 60)
-                : null;
-
+            var hasFfmpeg = plugin.ResolveFfmpegPath() != null;
+            var maxHeight = settings.MaxVideoHeight;
+            var maxSeconds = settings.MaxTrailerMinutes * 60;
+            Uri trailer = null;
             var micro = microVideoPathField.GetValue(control) as Uri;
             var providedMicro = false;
-            if (micro == null && settings.ProvideMicrotrailers && movie.MicrotrailerUrl != null)
+
+            var steamId = getSteamIdMethod.Invoke(control, new object[] { game }) as string;
+            var movie = string.IsNullOrEmpty(steamId)
+                ? null
+                : plugin.Resolver.Resolve(steamId, Path.Combine((string)pluginDataPathField.GetValue(control), $"{game.Id}_SteamAppDetails.json"));
+            if (movie != null)
             {
-                micro = new Uri(movie.MicrotrailerUrl);
-                providedMicro = true;
+                // Prepare starts converting right away, before the player asks for the file.
+                if (hasFfmpeg)
+                {
+                    var hlsUrls = movie.HlsUrls;
+                    var remuxer = plugin.Remuxer;
+                    trailer = plugin.Server.Prepare($"steam|{steamId}|{maxHeight}|{maxSeconds}|{hlsUrls[0]}", hlsUrls[0],
+                        (path, ct) => remuxer.ProduceSteamTrailerAsync(hlsUrls, maxHeight, maxSeconds, path, ct));
+                }
+
+                if (micro == null && settings.ProvideMicrotrailers && movie.MicrotrailerUrl != null)
+                {
+                    micro = new Uri(movie.MicrotrailerUrl);
+                    providedMicro = true;
+                }
+            }
+            else if (settings.YoutubeFallback && hasFfmpeg && plugin.ResolveYtDlpPath() != null)
+            {
+                // No Steam trailer (non-Steam game, or a Steam app without movies): look on YouTube.
+                // The search runs in the proxy's background job, never on this UI thread.
+                var query = YoutubeTrailerDownloader.BuildQuery(game.Name, game.ReleaseDate?.Year);
+                var gameKey = game.Id.ToString();
+                var youtube = plugin.Youtube;
+                if (!youtube.IsKnownMissing(gameKey, query))
+                {
+                    trailer = plugin.Server.Prepare($"youtube|{gameKey}|{query}|{maxHeight}|{maxSeconds}", $"YouTube search \"{query}\"",
+                        (path, ct) => youtube.DownloadAsync(gameKey, query, maxHeight, maxSeconds, path, ct));
+                }
             }
 
             if (trailer == null && !providedMicro)

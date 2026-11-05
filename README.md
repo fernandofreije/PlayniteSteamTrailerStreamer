@@ -20,10 +20,27 @@ Steam's appdetails API no longer lists MP4/WebM trailer files. It only gives HLS
 - ffmpeg copies the chosen video variant and the audio into one MP4 without re-encoding (about 1–3 s for a typical trailer at 720p). The server then serves it with Range support, so seeking, looping and fullscreen work.
 - Remuxed files live in `%TEMP%\SteamTrailerStreamer` with a size limit. They are deleted when Playnite starts and closes, unless "keep between sessions" is on.
 
+## YouTube fallback
+
+For games without a Steam trailer (Epic, GOG, Battle.net, other launchers, or Steam apps with no movies), the extension can find one on YouTube instead:
+
+- It searches YouTube for `<game name> <release year> official trailer` with yt-dlp. Results that look like a trailer come first, and reviews, let's plays and videos over the length limit are skipped.
+- yt-dlp downloads the chosen video as H.264 + AAC (the only codecs Playnite's player can play) up to the maximum quality setting, and ffmpeg merges it into one MP4. It is then served through the same local server as Steam trailers.
+- If a video can't be downloaded (age-restricted, region-blocked), the next result is tried, up to three.
+- The chosen video is remembered per game for 30 days. A game with no usable result isn't searched again for a day.
+- yt-dlp comes from Extra Metadata Loader's settings, or from this extension's override. If EML has a YouTube cookies file set, it is used too, which helps with age-restricted trailers.
+
+Things to know:
+- **Keep yt-dlp up to date** (`yt-dlp -U`). YouTube changes often, and an outdated yt-dlp typically fails with HTTP 403 errors.
+- The first view of a game takes a few seconds (search + download, about 5–10 s for a typical trailer at 720p). Later views come from the cache.
+- Search can occasionally pick the wrong video.
+- This downloads from YouTube, like EML's own trailer download feature. Turn it off in the settings if you don't want that.
+
 ## Requirements
 
 - Extra Metadata Loader (tested with 1.87), with **Stream Steam videos on demand** enabled.
 - ffmpeg. By default the extension uses the ffmpeg path set in EML's settings, and you can override it in this extension's settings. Without ffmpeg, only microtrailers are provided.
+- Optional, for the YouTube fallback: an up-to-date yt-dlp, from EML's settings or this extension's override.
 
 ## Build
 
@@ -51,5 +68,6 @@ Every push and PR also runs the CI build and uploads the `.pext` as a workflow a
 - Maximum trailer quality (360/480/720/1080). Lower quality starts faster.
 - Skip videos longer than N minutes
 - ffmpeg path override
+- YouTube fallback on/off and yt-dlp path override
 - Provide microtrailers to EML's switch-video button
 - Cache limit, keep cache between sessions, and a button to clear the cache

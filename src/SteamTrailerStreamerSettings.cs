@@ -24,6 +24,14 @@ namespace SteamTrailerStreamer
         /// <summary>Optional override. When empty, Extra Metadata Loader's ffmpeg path is used.</summary>
         public string FfmpegPath { get => ffmpegPath; set => SetValue(ref ffmpegPath, value); }
 
+        private bool youtubeFallback = true;
+        /// <summary>Search YouTube (with yt-dlp) when there is no Steam trailer, e.g. for Epic, GOG or Battle.net games.</summary>
+        public bool YoutubeFallback { get => youtubeFallback; set => SetValue(ref youtubeFallback, value); }
+
+        private string ytDlpPath = string.Empty;
+        /// <summary>Optional override. When empty, Extra Metadata Loader's yt-dlp path is used.</summary>
+        public string YtDlpPath { get => ytDlpPath; set => SetValue(ref ytDlpPath, value); }
+
         private bool provideMicrotrailers = true;
         public bool ProvideMicrotrailers { get => provideMicrotrailers; set => SetValue(ref provideMicrotrailers, value); }
 
@@ -44,6 +52,9 @@ namespace SteamTrailerStreamer
 
         [DontSerialize]
         public string DetectedFfmpegPath => plugin.ResolveFfmpegPath() ?? "Not found";
+
+        [DontSerialize]
+        public string DetectedYtDlpPath => plugin.ResolveYtDlpPath() ?? "Not found";
 
         [DontSerialize]
         public RelayCommand ClearCacheCommand => new RelayCommand(() =>
@@ -73,6 +84,7 @@ namespace SteamTrailerStreamer
             plugin.SavePluginSettings(Settings);
             plugin.Cache?.SetLimit(Settings.CacheLimitMb);
             OnPropertyChanged(nameof(DetectedFfmpegPath));
+            OnPropertyChanged(nameof(DetectedYtDlpPath));
         }
 
         public bool VerifySettings(out List<string> errors)

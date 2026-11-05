@@ -6,16 +6,17 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace SteamTrailerStreamer
 {
-    public class HlsTrailer
+    /// <summary>A Steam trailer as separate video and audio stream URLs (AudioUrl is null for a single muxed stream).</summary>
+    public class TrailerStreams
     {
-        public string MasterUrl { get; set; }
+        /// <summary>The HLS master playlist the streams came from, for logging.</summary>
+        public string SourceUrl { get; set; }
         public string VideoUrl { get; set; }
         public string AudioUrl { get; set; }
         public int Height { get; set; }
@@ -23,7 +24,7 @@ namespace SteamTrailerStreamer
     }
 
     /// <summary>
-    /// Turns a Steam HLS trailer (separate fMP4 video and audio playlists) into a single progressive MP4
+    /// Turns a trailer with separate video and audio streams (Steam HLS) into a single progressive MP4
     /// that WPF's MediaElement can play. Streams are copied, never re-encoded.
     /// </summary>
     public class FfmpegRemuxer
@@ -46,9 +47,9 @@ namespace SteamTrailerStreamer
         /// Returns the first movie no longer than <paramref name="maxSeconds"/>, or the shortest one when all are longer.
         /// Some games highlight 10+ minute gameplay videos, which would take far too long to fetch.
         /// </summary>
-        public async Task<HlsTrailer> SelectAsync(IList<string> masterUrls, int maxHeight, int maxSeconds, CancellationToken cancellationToken)
+        public async Task<TrailerStreams> SelectAsync(IList<string> masterUrls, int maxHeight, int maxSeconds, CancellationToken cancellationToken)
         {
-            HlsTrailer shortest = null;
+            TrailerStreams shortest = null;
             foreach (var masterUrl in masterUrls)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -73,7 +74,18 @@ namespace SteamTrailerStreamer
             return shortest;
         }
 
-        public async Task RemuxAsync(HlsTrailer trailer, string outputPath, CancellationToken cancellationToken)
+        /// <summary>Picks the Steam movie to use (see <see cref="SelectAsync"/>) and remuxes it to <paramref name="outputPath"/>.</summary>
+        public async Task ProduceSteamTrailerAsync(IList<string> masterUrls, int maxHeight, int maxSeconds, string outputPath, CancellationToken cancellationToken)
+        {
+            var trailer = await SelectAsync(masterUrls, maxHeight, maxSeconds, cancellationToken).ConfigureAwait(false);
+            if (trailer == null)
+            {
+                throw new InvalidOperationException("No playable Steam trailer found.");
+            }
+            await RemuxAsync(trailer, outputPath, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task RemuxAsync(TrailerStreams trailer, string outputPath, CancellationToken cancellationToken)
         {
             var ffmpegPath = ffmpegPathProvider();
             if (ffmpegPath == null)
@@ -90,7 +102,7 @@ namespace SteamTrailerStreamer
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                await RunProcessAsync(ffmpegPath, args, cancellationToken).ConfigureAwait(false);
+                await ProcessRunner.RunAsync(ffmpegPath, args, processTimeout, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -100,14 +112,14 @@ namespace SteamTrailerStreamer
 
             TryDelete(outputPath);
             File.Move(tempPath, outputPath);
-            logger.Info($"Remuxed {trailer.DurationSeconds:0}s {trailer.Height}p Steam trailer in {stopwatch.ElapsedMilliseconds} ms: {trailer.MasterUrl}");
+            logger.Info($"Remuxed {trailer.DurationSeconds:0}s {trailer.Height}p trailer in {stopwatch.ElapsedMilliseconds} ms: {trailer.SourceUrl}");
         }
 
         /// <summary>
         /// Reads the master playlist to pick the best video variant within the height limit plus the audio
         /// playlist (so ffmpeg only downloads what it needs), and sums the variant's segment durations.
         /// </summary>
-        private static async Task<HlsTrailer> InspectAsync(string masterUrl, int maxHeight, CancellationToken cancellationToken)
+        private static async Task<TrailerStreams> InspectAsync(string masterUrl, int maxHeight, CancellationToken cancellationToken)
         {
             try
             {
@@ -153,9 +165,9 @@ namespace SteamTrailerStreamer
                     logger.Warn($"Could not read HLS video playlist {video.Value}: {e.Message}");
                 }
 
-                return new HlsTrailer
+                return new TrailerStreams
                 {
-                    MasterUrl = masterUrl,
+                    SourceUrl = masterUrl,
                     VideoUrl = video.Value,
                     AudioUrl = audioUri,
                     Height = video.Key,
@@ -188,82 +200,6 @@ namespace SteamTrailerStreamer
                 }
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { }
-        }
-
-        private static Task RunProcessAsync(string fileName, string arguments, CancellationToken cancellationToken)
-        {
-            var completion = new TaskCompletionSource<bool>();
-            var errors = new StringBuilder();
-            var process = new Process
-            {
-                StartInfo = new ProcessStartInfo(fileName, arguments)
-                {
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardError = true,
-                    RedirectStandardOutput = true
-                },
-                EnableRaisingEvents = true
-            };
-
-            process.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (errors) errors.AppendLine(e.Data); };
-            process.OutputDataReceived += (s, e) => { };
-            // This runs on a thread-pool callback: an exception escaping it would crash Playnite, so it
-            // must never throw. It is also the only place the process is disposed, because it can fire
-            // after a cancellation has already completed the task.
-            process.Exited += (s, e) =>
-            {
-                try
-                {
-                    // Make sure the async stderr reader has flushed before we read the exit code.
-                    process.WaitForExit();
-                    if (process.ExitCode == 0)
-                    {
-                        completion.TrySetResult(true);
-                    }
-                    else
-                    {
-                        completion.TrySetException(new Exception($"ffmpeg exited with code {process.ExitCode}: {errors}"));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    completion.TrySetException(ex);
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-            };
-
-            process.Start();
-            process.BeginErrorReadLine();
-            process.BeginOutputReadLine();
-
-            var timeout = new CancellationTokenSource(processTimeout);
-            var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-            var registration = linked.Token.Register(() =>
-            {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill();
-                        // Wait so the .part file is released before the caller deletes it.
-                        process.WaitForExit(5000);
-                    }
-                }
-                catch (Exception) { }
-                completion.TrySetCanceled();
-            });
-
-            return completion.Task.ContinueWith(t =>
-            {
-                registration.Dispose();
-                linked.Dispose();
-                timeout.Dispose();
-                return t;
-            }, TaskScheduler.Default).Unwrap();
         }
     }
 }
