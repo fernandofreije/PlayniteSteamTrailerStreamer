@@ -22,6 +22,8 @@ namespace SteamTrailerStreamer
         internal TrailerCache Cache { get; private set; }
         internal TrailerProxyServer Server { get; private set; }
         internal SteamMovieResolver Resolver { get; private set; }
+        internal YoutubeTrailerDownloader Youtube { get; private set; }
+        internal FfmpegRemuxer Remuxer { get; private set; }
 
         public override Guid Id { get; } = Guid.Parse("accc7230-a738-400d-82ef-9e363d51219a");
 
@@ -39,7 +41,9 @@ namespace SteamTrailerStreamer
                 Cache = new TrailerCache(Path.Combine(Path.GetTempPath(), "SteamTrailerStreamer"), SettingsViewModel.Settings.CacheLimitMb);
                 ClearCacheUnlessKept();
                 Resolver = new SteamMovieResolver(Path.Combine(GetPluginUserDataPath(), "appdetails"));
-                Server = new TrailerProxyServer(Cache, new FfmpegRemuxer(ResolveFfmpegPath));
+                Youtube = new YoutubeTrailerDownloader(Path.Combine(GetPluginUserDataPath(), "youtube"), ResolveYtDlpPath, ResolveFfmpegPath, ResolveYoutubeCookiesPath);
+                Remuxer = new FfmpegRemuxer(ResolveFfmpegPath);
+                Server = new TrailerProxyServer(Cache);
                 Server.Start();
             }
             catch (Exception e)
@@ -88,7 +92,23 @@ namespace SteamTrailerStreamer
         /// <summary>Our override if set, otherwise Extra Metadata Loader's configured ffmpeg.</summary>
         internal string ResolveFfmpegPath()
         {
-            var overridePath = SettingsViewModel.Settings.FfmpegPath;
+            return ResolveToolPath(SettingsViewModel.Settings.FfmpegPath, "FfmpegPath");
+        }
+
+        /// <summary>Our override if set, otherwise Extra Metadata Loader's configured yt-dlp.</summary>
+        internal string ResolveYtDlpPath()
+        {
+            return ResolveToolPath(SettingsViewModel.Settings.YtDlpPath, "YoutubeDlPath");
+        }
+
+        /// <summary>Extra Metadata Loader's YouTube cookies file, if one is configured.</summary>
+        internal string ResolveYoutubeCookiesPath()
+        {
+            return ResolveToolPath(null, "YoutubeCookiesPath");
+        }
+
+        private string ResolveToolPath(string overridePath, string emlSettingName)
+        {
             if (!string.IsNullOrWhiteSpace(overridePath))
             {
                 return File.Exists(overridePath) ? overridePath : null;
@@ -99,7 +119,7 @@ namespace SteamTrailerStreamer
                 var emlConfig = Path.Combine(PlayniteApi.Paths.ExtensionsDataPath, emlPluginId, "config.json");
                 if (File.Exists(emlConfig))
                 {
-                    var path = (string)JObject.Parse(File.ReadAllText(emlConfig))["FfmpegPath"];
+                    var path = (string)JObject.Parse(File.ReadAllText(emlConfig))[emlSettingName];
                     if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
                     {
                         return path;

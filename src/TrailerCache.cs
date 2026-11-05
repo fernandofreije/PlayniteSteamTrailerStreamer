@@ -59,7 +59,9 @@ namespace SteamTrailerStreamer
         {
             lock (trimLock)
             {
+                // Skip in-progress downloads ("<id>.mp4.part.*"); only finished trailers count and get evicted.
                 var files = new DirectoryInfo(Directory).GetFiles("*.mp4")
+                    .Where(f => !f.Name.Contains(".part."))
                     .OrderByDescending(f => f.LastAccessTimeUtc)
                     .ToList();
                 var total = files.Sum(f => f.Length);
@@ -92,6 +94,7 @@ namespace SteamTrailerStreamer
         public void DeletePartialFiles()
         {
             DeleteFiles("*.part");
+            DeleteFiles("*.part.*");
         }
 
         private void DeleteFiles(string pattern)

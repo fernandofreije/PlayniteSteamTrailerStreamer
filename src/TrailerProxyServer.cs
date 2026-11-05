@@ -14,7 +14,7 @@ namespace SteamTrailerStreamer
 {
     /// <summary>
     /// Minimal HTTP/1.1 server on 127.0.0.1. MediaElement requests /trailer?id={id} for a trailer
-    /// registered with <see cref="Prepare"/>; it is remuxed once into the temporary cache and then served
+    /// registered with <see cref="Prepare"/>; it is produced once into the temporary cache and then served
     /// with Range support so seeking and looping work. Only registered ids are served, so the port can't be
     /// used to fetch arbitrary URLs.
     /// A raw TcpListener avoids HttpListener's URL ACL / admin requirements.
@@ -26,7 +26,6 @@ namespace SteamTrailerStreamer
         private const int bufferSize = 81920;
 
         private readonly TrailerCache cache;
-        private readonly FfmpegRemuxer remuxer;
         private readonly ConcurrentDictionary<string, TrailerRequest> requests = new ConcurrentDictionary<string, TrailerRequest>();
         private readonly ConcurrentDictionary<string, TrailerJob> jobs = new ConcurrentDictionary<string, TrailerJob>();
         // Fast scrolling through games must not spawn a pile of ffmpeg processes.
@@ -36,10 +35,9 @@ namespace SteamTrailerStreamer
 
         public int Port { get; private set; }
 
-        public TrailerProxyServer(TrailerCache cache, FfmpegRemuxer remuxer)
+        public TrailerProxyServer(TrailerCache cache)
         {
             this.cache = cache;
-            this.remuxer = remuxer;
         }
 
         public void Start()
@@ -64,15 +62,18 @@ namespace SteamTrailerStreamer
         /// <summary>
         /// Registers a game's trailer and starts converting it immediately, so it is often ready by the time
         /// the player asks for it. Conversions for games the user already moved away from are cancelled.
+        /// <paramref name="produce"/> writes the playable MP4 to the path it is given; it runs in the background
+        /// job (never on the caller's thread), so it may be slow, and must honour the cancellation token.
         /// </summary>
-        public Uri Prepare(string appId, List<string> hlsUrls, int maxHeight, int maxSeconds)
+        /// <param name="key">Identifies the trailer and its quality limits; equal keys share one cached file.</param>
+        /// <param name="description">Shown in the log when the trailer fails.</param>
+        public Uri Prepare(string key, string description, Func<string, CancellationToken, Task> produce)
         {
-            var id = TrailerCache.MakeId($"{appId}|{maxHeight}|{maxSeconds}|{hlsUrls[0]}");
+            var id = TrailerCache.MakeId(key);
             var request = new TrailerRequest
             {
-                HlsUrls = hlsUrls,
-                MaxHeight = maxHeight,
-                MaxSeconds = maxSeconds,
+                Description = description,
+                Produce = produce,
                 Path = cache.GetPath(id)
             };
             requests[id] = request;
@@ -179,7 +180,7 @@ namespace SteamTrailerStreamer
                         }
                         catch (Exception e)
                         {
-                            logger.Error(e, $"Failed to prepare Steam trailer {trailerRequest.HlsUrls[0]}");
+                            logger.Error(e, $"Failed to prepare trailer {trailerRequest.Description}");
                             await WriteStatusAsync(stream, "502 Bad Gateway").ConfigureAwait(false);
                             return;
                         }
@@ -235,12 +236,7 @@ namespace SteamTrailerStreamer
             {
                 if (!File.Exists(request.Path))
                 {
-                    var trailer = await remuxer.SelectAsync(request.HlsUrls, request.MaxHeight, request.MaxSeconds, cancellationToken).ConfigureAwait(false);
-                    if (trailer == null)
-                    {
-                        throw new InvalidOperationException("No playable Steam trailer found.");
-                    }
-                    await remuxer.RemuxAsync(trailer, request.Path, cancellationToken).ConfigureAwait(false);
+                    await request.Produce(request.Path, cancellationToken).ConfigureAwait(false);
                 }
                 cache.MarkUsed(request.Path);
                 cache.Trim(request.Path);
@@ -346,9 +342,8 @@ namespace SteamTrailerStreamer
 
         private class TrailerRequest
         {
-            public List<string> HlsUrls;
-            public int MaxHeight;
-            public int MaxSeconds;
+            public string Description;
+            public Func<string, CancellationToken, Task> Produce;
             public string Path;
         }
 
