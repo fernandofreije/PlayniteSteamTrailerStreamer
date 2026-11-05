@@ -1,4 +1,4 @@
-﻿# Reusable build: compiles the extension and packs the .pext with Playnite's Toolbox.
+# Reusable build: compiles the extension and packs the .pext with Playnite's Toolbox.
 name: Build
 
 on:
