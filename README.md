@@ -1,12 +1,22 @@
 # Steam Trailer Streamer
 
-A Playnite add-on for [Extra Metadata Loader](https://github.com/darklinkpower/PlayniteExtensionsCollection/wiki/Extra-Metadata-Loader) (EML). It makes EML's "Stream Steam videos on demand" option work for trailers that use Steam's newer streaming format.
+A [Playnite](https://playnite.link/) add-on that brings back on-demand Steam trailer streaming in [Extra Metadata Loader](https://github.com/darklinkpower/PlayniteExtensionsCollection) (EML), and adds YouTube as a fallback for games that have no Steam trailer.
 
-## Why
+> [!IMPORTANT]
+> This is **not** a standalone extension. It hooks into [Extra Metadata Loader](https://github.com/darklinkpower/PlayniteExtensionsCollection) ([wiki](https://github.com/darklinkpower/PlayniteExtensionsCollection/wiki/Extra-Metadata-Loader)) and only works with EML installed and its video player in use. Without EML it does nothing.
 
-Steam's appdetails API no longer lists MP4/WebM trailer files. It only gives HLS/DASH streaming manifests (`hls_h264`, `dash_h264`, `dash_av1`).
+## Motivation
+
+EML can stream Steam trailers on demand ("Stream Steam videos on demand") instead of downloading them. That keeps your library small, since no video files are stored on disk.
+
+In late 2025 Steam started moving its trailers to adaptive streaming, and around January 2026 it stopped providing them as single MP4/WebM files. The store API now only lists adaptive streaming manifests (HLS and DASH: `hls_h264`, `dash_h264`, `dash_av1`), where video and audio are split into separate segmented streams. EML's streaming relied on the old MP4 files and Playnite's player (WPF `MediaElement`) can't play HLS/DASH, so trailer streaming stopped working for every newer trailer:
+
 - **Older trailers** still exist at the legacy `movie_max.mp4` URL that EML guesses, so EML keeps working for them.
-- **Newer trailers** only exist as segmented streams with separate video and audio. Playnite's player (WPF `MediaElement`) can't play those.
+- **Newer trailers** only exist as HLS/DASH streams, and show nothing.
+
+The only workaround left was downloading every trailer, which is exactly what streaming was meant to avoid if you want to save space.
+
+This extension fills that gap: when EML finds no playable trailer, it converts the Steam stream into a file Playnite can play, on the fly, and serves it to EML's player. While at it, it also adds **YouTube as a streaming fallback**, so games from other stores (or Steam games with no trailer) get a trailer too, again without keeping files around.
 
 ## How it works
 
@@ -38,7 +48,7 @@ Things to know:
 
 ## Requirements
 
-- Extra Metadata Loader (tested with 1.87), with **Stream Steam videos on demand** enabled.
+- [Extra Metadata Loader](https://github.com/darklinkpower/PlayniteExtensionsCollection) (tested with 1.87), with **Stream Steam videos on demand** enabled. This extension doesn't work without it.
 - ffmpeg. By default the extension uses the ffmpeg path set in EML's settings, and you can override it in this extension's settings. Without ffmpeg, only microtrailers are provided.
 - Optional, for the YouTube fallback: an up-to-date yt-dlp, from EML's settings or this extension's override.
 
